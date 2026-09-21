@@ -19,17 +19,24 @@ def descargarHTML(url: str):
     return html.text
 
 def detectarLinks(html: str):
+    patron = r'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}(?:/[^\s"<>]*)?'
     soup = BeautifulSoup(html, "html.parser")
     links = set()
     for link in soup.find_all("a"):
         href = link.get("href")
-        if href and href.startswith("http"):
+        if href and re.match(patron, href):
             links.add(href)
     return links
 
 def guardarLinks(links: set[str]):
-    with open("URLs.txt", "w") as archivo:
-        for link in links:
+
+    with open("URLs.txt") as archivo:
+        existentes = set(archivo.readlines())
+
+    nuevos = links - existentes 
+
+    with open("URLs.txt", "a") as archivo:
+        for link in nuevos:
             archivo.write(f"{link}\n")
             print(link)
 
