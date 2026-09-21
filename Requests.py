@@ -1,4 +1,4 @@
-#Elaborado por: Elias y Ignacio
+#Elaborado por: Elias e Ignacio
 
 from datetime import datetime
 import os 
