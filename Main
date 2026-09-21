@@ -1,7 +1,7 @@
 import Requests
 
 def Main():
-    URLs = Requests.leerURLs()
+    URLs = Requests.leerURLs("URLs.txt")
     for url in URLs:
         html = Requests.descargarHTML(url)
         links = Requests.detectarLinks(html)

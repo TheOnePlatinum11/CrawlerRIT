@@ -7,36 +7,47 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-
-
-def leerURLs():
-    with open("URLs.txt") as archivo:
+def leerURLs(file_path: str):
+    with open(file_path) as archivo:
         URLs = set(archivo.readlines())
     return URLs
 
+
 def descargarHTML(url: str):
-    html = requests.get(url)
-    return html.text
+    try:
+        explorados = set()
+        headers = {
+            'User-Agent': 'BreteRIT/1.0'
+            }
+        with open("URLsExplorados.txt") as archivo:
+            explorados = set(archivo.readlines())
+        if url  in explorados:
+            return ""
+        html = requests.get(url, headers=headers)
+        with open("URLsExplorados.txt", "a") as archivo:
+            archivo.write(f"{url}\n")
+        return html.text
+    except requests.RequestException as e:
+        print(f"Error al descargar {url}: {e}")
+        return ""
 
 def detectarLinks(html: str):
     patron = r'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}(?:/[^\s"<>]*)?'
     soup = BeautifulSoup(html, "html.parser")
     links = set()
+    with open("URLs.txt") as archivo:
+        existentes = set(archivo.readlines())
     for link in soup.find_all("a"):
         href = link.get("href")
         if href and re.match(patron, href):
             links.add(href)
+    links = links - existentes
     return links
 
 def guardarLinks(links: set[str]):
 
-    with open("URLs.txt") as archivo:
-        existentes = set(archivo.readlines())
-
-    nuevos = links - existentes 
-
     with open("URLs.txt", "a") as archivo:
-        for link in nuevos:
+        for link in links:
             archivo.write(f"{link}\n")
             print(link)
 
