@@ -19,13 +19,12 @@ def descargarHTML(url: str):
         headers = {
             'User-Agent': 'BreteRIT/1.0'
             }
-        with open("URLsExplorados.txt") as archivo:
-            explorados = set(archivo.readlines())
+        explorados = leerURLs("URLsExplorados.txt")
         if url  in explorados:
             return ""
         html = requests.get(url, headers=headers)
         with open("URLsExplorados.txt", "a") as archivo:
-            archivo.write(f"{url}\n")
+            archivo.write(f"{url}")
         return html.text
     except requests.RequestException as e:
         print(f"Error al descargar {url}: {e}")
@@ -35,8 +34,7 @@ def detectarLinks(html: str):
     patron = r'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}(?:/[^\s"<>]*)?'
     soup = BeautifulSoup(html, "html.parser")
     links = set()
-    with open("URLs.txt") as archivo:
-        existentes = set(archivo.readlines())
+    existentes = leerURLs("URLs.txt")
     for link in soup.find_all("a"):
         href = link.get("href")
         if href and re.match(patron, href):
