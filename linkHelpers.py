@@ -34,7 +34,7 @@ def depurarLinks():
 
 def leerURLs(file_path: str):
     with open(file_path) as archivo:
-        URLs = set(archivo.readlines())
+        URLs = set(linea.strip() for linea in archivo)
     return URLs
 
 def descargarHTML(url: str, numIter: int):
@@ -49,6 +49,17 @@ def descargarHTML(url: str, numIter: int):
     except requests.RequestException as e:
         print(f"Error al descargar {url}: {e}")
         return ""
+
+def extraerTexto(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    texto = soup.get_text()
+    return texto
+
+def guardarTexto(texto: str, nomArchivo: str):
+    if nomArchivo:
+        nombre = re.sub(r'[<>:"/\\|?*]', '_', nomArchivo)
+        with open(f"HTMLs/{nombre}.txt", "w", encoding="utf-8") as archivo:
+            archivo.write(texto)
 
 def detectarLinks(html: str, numIter: int):
     patron = r'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}(?:/[^\s"<>]*)?'
