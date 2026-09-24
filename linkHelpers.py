@@ -1,24 +1,35 @@
 #Elaborado por: Elias e Ignacio
 
-from datetime import datetime
-import os 
-import sys
+import logging
+import os
 import re
+import threading
+import time
+from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
 
 listaURLs = set()
-NUM_ITERS = 3 # unas 40 ???
+NUM_ITERS = 3  # unas 40 ???
+MAX_WORKERS = 10
+DELAY = 1.0
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s [%(threadName)s] %(message)s")
+logger = logging.getLogger("crawler")
+
+ultimoAcceso = {}
+crawlLock = threading.Lock()
+
 
 def guardarLinks(links: set[str], nomArchivo: str):
     with open(f"assets/URLs{nomArchivo}.txt", "a") as archivo:
         for link in links:
             archivo.write(f"{link}\n")
 
+
 def depurarLinks():
-    # aca debemos agarrar todos los links en los n archivos
-    # y meterlos en uno solo, para tener una lista final de
-    # links a descargar
     listaURLs.clear()
     i = 0
     while i < NUM_ITERS:
@@ -32,41 +43,61 @@ def depurarLinks():
     guardarLinks(listaURLs, "Explorados")
     return listaURLs
 
-def leerURLs(file_path: str):
-    with open(file_path) as archivo:
+
+def leerURLs(filePath: str):
+    with open(filePath) as archivo:
         URLs = set(linea.strip() for linea in archivo)
     return URLs
 
-def descargarHTML(url: str, numIter: int):
-    print(f"Descargando: {url}")
+
+def descargarHTML(url: str, numIter: int = 0):
+    logger.info(f"Descargando: {url}")
     try:
         headers = {
             'User-Agent': 'BreteRIT/1.0'
-            }
-        
+        }
         html = requests.get(url, headers=headers)
         return html.text
     except requests.RequestException as e:
-        print(f"Error al descargar {url}: {e}")
+        logger.error(f"Error al descargar {url}: {e}")
         return ""
 
-def extraerTexto(html: str):
-    soup = BeautifulSoup(html, "html.parser")
-    texto = soup.get_text()
-    return texto
+
+def nombreArchivo(nomArchivo: str) -> str:
+    nombre = re.sub(r'[<>:"/\\|?*]', '_', nomArchivo)
+    return f"HTMLs/{nombre}.txt"
+
+
+def yaDescargado(nomArchivo: str) -> bool:
+    return bool(nomArchivo) and os.path.exists(nombreArchivo(nomArchivo))
+
 
 def guardarTexto(texto: str, nomArchivo: str):
-    if nomArchivo:
-        nombre = re.sub(r'[<>:"/\\|?*]', '_', nomArchivo)
-        with open(f"HTMLs/{nombre}.txt", "w", encoding="utf-8") as archivo:
-            archivo.write(texto)
+    if not nomArchivo:
+        return
+    os.makedirs("HTMLs", exist_ok=True)
+    with open(nombreArchivo(nomArchivo), "w", encoding="utf-8") as archivo:
+        archivo.write(texto)
 
-def detectarLinks(html: str, numIter: int):
+
+def esperarCrawlDelay(url: str):
+    host = urlparse(url).netloc
+    with crawlLock:
+        disponible = ultimoAcceso.get(host, 0.0)
+        ahora = time.time()
+        espera = max(disponible - ahora, 0.0)
+        ultimoAcceso[host] = max(disponible, ahora) + DELAY
+    if espera > 0:
+        time.sleep(espera)
+
+
+def parsearPagina(html: str):
     patron = r'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}(?:/[^\s"<>]*)?'
     soup = BeautifulSoup(html, "html.parser")
+    texto = soup.get_text()
     links = set()
     for link in soup.find_all("a"):
         href = link.get("href")
         if href and re.match(patron, href):
             links.add(href)
-    return links
+    return texto, links
