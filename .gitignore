@@ -1,4 +1,5 @@
 HTMLs/
 __pycache__/
-assets/
+assets/*
+!assets/URLs0.txt
 .venv
