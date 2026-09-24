@@ -1,3 +1,4 @@
 HTMLs/
 __pycache__/
 assets/
+.venv

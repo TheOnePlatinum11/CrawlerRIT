@@ -2,8 +2,9 @@ import threading
 from queue import Queue
 
 from linkHelpers import (
-    MAX_WORKERS, NUM_ITERS, depurarLinks, descargarHTML, esperarCrawlDelay,
-    guardarLinks, guardarTexto, leerURLs, logger, parsearPagina, yaDescargado,
+    MAX_WORKERS, NUM_ITERS, cerrarDrivers, depurarLinks, descargarHTML,
+    esperarCrawlDelay, guardarLinks, guardarTexto, leerURLs, logger,
+    parsearPagina, yaDescargado,
 )
 
 STOP = object()
@@ -32,6 +33,7 @@ def trabajador():
     while True:
         url = cola.get()
         if url is STOP:
+            cerrarDrivers()
             break
         esperarCrawlDelay(url)
         procesarURL(url)
