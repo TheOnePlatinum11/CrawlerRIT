@@ -15,7 +15,6 @@ from selenium.webdriver.chrome.options import Options
 
 listaURLs = set()
 NUM_ITERS = 3  # unas 40 ???
-MAX_WORKERS = 4
 DELAY = 1.0
 RENDER_WAIT = 2.5
 
