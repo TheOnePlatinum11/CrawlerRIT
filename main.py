@@ -1,8 +1,9 @@
+import argparse
 import threading
 from queue import Queue
 
 from linkHelpers import (
-    MAX_WORKERS, MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, depurarLinks,
+    MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, depurarLinks,
     descargarHTML, esRobotsPermitido, esperarCrawlDelay, guardarLinks,
     guardarTexto, leerURLs, logger, parsearPagina, puntajeRelevancia,
     seleccionarFrontera, yaDescargado,
@@ -54,10 +55,10 @@ def trabajador():
                     loteTerminado.set()
 
 
-def main():
+def main(maxWorkers: int):
     global pendientes
     hilos = [threading.Thread(target=trabajador, name=f"araña-{n}")
-             for n in range(MAX_WORKERS)]
+             for n in range(maxWorkers)]
     for t in hilos:
         t.start()
 
@@ -91,5 +92,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="BreteRIT: araña enfocada")
+    parser.add_argument("--workers", type=int, default=4,
+                        help=f"número de hilos araña (default: 4)")
+    args = parser.parse_args()
+    main(maxWorkers=args.workers)
     depurarLinks()
