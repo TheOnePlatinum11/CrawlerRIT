@@ -2,9 +2,10 @@ import threading
 from queue import Queue
 
 from linkHelpers import (
-    MAX_WORKERS, NUM_ITERS, cerrarDrivers, depurarLinks, descargarHTML,
-    esperarCrawlDelay, guardarLinks, guardarTexto, leerURLs, logger,
-    parsearPagina, yaDescargado,
+    MAX_WORKERS, MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, depurarLinks,
+    descargarHTML, esRobotsPermitido, esperarCrawlDelay, guardarLinks,
+    guardarTexto, leerURLs, logger, parsearPagina, puntajeRelevancia,
+    seleccionarFrontera, yaDescargado,
 )
 
 STOP = object()
@@ -23,6 +24,11 @@ def procesarURL(url: str):
     if not html:
         return
     texto, links = parsearPagina(html)
+    p = puntajeRelevancia(texto)
+    if p < MIN_RELEVANCIA:
+        logger.info(f"[PUNT] {url}: relevancia {p} < {MIN_RELEVANCIA}, descartada")
+        return
+    logger.info(f"[PUNT] {url}: relevancia {p}")
     guardarTexto(texto, url)
     with lock:
         linksAcumulados.update(links)
@@ -35,12 +41,17 @@ def trabajador():
         if url is STOP:
             cerrarDrivers()
             break
-        esperarCrawlDelay(url)
-        procesarURL(url)
-        with lock:
-            pendientes -= 1
-            if pendientes == 0:
-                loteTerminado.set()
+        try:
+            esperarCrawlDelay(url)
+            if esRobotsPermitido(url):
+                procesarURL(url)
+            else:
+                logger.info(f"[ROBOTS] {url}: descartado por robots.txt")
+        finally:
+            with lock:
+                pendientes -= 1
+                if pendientes == 0:
+                    loteTerminado.set()
 
 
 def main():
@@ -67,8 +78,10 @@ def main():
         logger.info(f"Lote {i}: {len(urls)} URLs en cola")
 
         loteTerminado.wait()
-        guardarLinks(linksAcumulados, str(i + 1))
-        logger.info(f"Lote {i} terminado: {len(urls)} URLs procesadas")
+        frontera = seleccionarFrontera(linksAcumulados)
+        guardarLinks(frontera, str(i + 1))
+        logger.info(f"Lote {i} terminado: {len(urls)} URLs procesadas, "
+                    f"frontera [{len(frontera)}]")
         i += 1
 
     for _ in hilos:

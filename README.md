@@ -96,7 +96,7 @@ Latinomaérica"*.
 
 ## URLs semilla
 
-La primera iteración parte de `assets/URLs0.txt` (28 URLs, validadas con HTTP 200):
+La primera iteración parte de `assets/URLs0.txt` (45 URLs, validadas con HTTP 200):
 
 **Panorama general del tema**
 1. https://es.wikipedia.org/wiki/Intervenciones_de_Estados_Unidos_en_Am%C3%A9rica_Latina
