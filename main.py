@@ -3,7 +3,7 @@ import threading
 from queue import Queue
 
 from linkHelpers import (
-    MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, descargarHTML,
+    MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, descargarPagina,
     esRobotsPermitido, esperarCrawlDelay, extraerTitulo, guardarResultadoBD,
     guardarTexto, inicializarBD, logger, obtenerURLsPendientesBD,
     parsearPagina, puntajeRelevancia, registrarURLsBD, seleccionarFrontera,
@@ -20,11 +20,11 @@ loteTerminado = threading.Event()
 
 
 def procesarURL(url: str):
-    html, codigoEstado = descargarHTML(url, incluirEstado=True)
+    html, codigoEstado = descargarPagina(url, incluirEstado=True)
     if not html:
         return None, codigoEstado
     titulo = extraerTitulo(html)
-    texto, links = parsearPagina(html)
+    texto, links = parsearPagina(html, url)
     p = puntajeRelevancia(texto)
     if p < MIN_RELEVANCIA:
         logger.info(f"[PUNT] {url}: relevancia {p} < {MIN_RELEVANCIA}, descartada")

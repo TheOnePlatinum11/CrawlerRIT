@@ -5,13 +5,11 @@ import os
 import re
 import threading
 import time
-from urllib.parse import urlparse, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 
 import sqlite3
 
@@ -21,6 +19,11 @@ listaURLs = set()
 NUM_ITERS = 3  # unas 40 ???
 DELAY = 1.0
 RENDER_WAIT = 2.5
+
+TIMEOUT_HTTP = (10, 30)  # (conectar, leer)
+
+MIN_CHARS_JS = 400
+MIN_PRUEBAS_JS = 12
 
 MIN_RELEVANCIA = 4
 MAX_LINKS_POR_ITERACION = 1000
@@ -81,11 +84,29 @@ robotsCache = {}
 robotsLock = threading.Lock()
 
 driverLocal = threading.local()
+sesionLocal = threading.local()
+
+SEMAFORO_JS = threading.Semaphore(2)
+hostsConJS = set()
+presupuestoJS = [MIN_PRUEBAS_JS]
+presupuestoLock = threading.Lock()
+
+
+def _sesion() -> requests.Session:
+    sesion = getattr(sesionLocal, "sesion", None)
+    if sesion is None:
+        sesion = requests.Session()
+        sesion.headers.update({"User-Agent": "BreteRIT/1.0"})
+        sesionLocal.sesion = sesion
+    return sesion
 
 
 def _driver():
     driver = getattr(driverLocal, "driver", None)
     if driver is None:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+
         opciones = Options()
         opciones.add_argument("--headless=new")
         opciones.add_argument("--no-sandbox")
@@ -246,34 +267,115 @@ def esRobotsPermitido(url: str) -> bool:
     return parser.can_fetch("BreteRIT/1.0", url)
 
 
-def descargarHTML(url: str, numIter: int = 0, incluirEstado: bool = False):
-    logger.info(f"Descargando: {url}")
+RE_BLOQUES = re.compile(r"(?is)<(script|style|noscript)\b[^>]*>.*?</\1\s*>")
+RE_ETIQUETAS = re.compile(r"(?s)<[^>]+>")
+RE_ESPACIOS = re.compile(r"\s+")
+RE_HREF = re.compile(r"""(?is)<a\b[^>]*\shref\s*=""")
+RE_SHELL = re.compile(
+    r"""(?i)(id=["'](?:root|app|__next|___gatsby)["']"""
+    r"""|data-reactroot|\bng-app\b|__NUXT__|__NEXT_DATA__"""
+    r"""|data-svelte|window\.__INITIAL_STATE__)""",
+)
+RE_DESAFIO = re.compile(
+    r"(?i)(just a moment|checking your browser"
+    r"|attention required.{0,20}cloudflare|cf-browser-verification|cf_chl_"
+    r"|enable javascript and cookies|verifying you are human"
+    r"|captcha-delivery|px-captcha"
+    r"|request unsuccessful.{0,40}incapsula|access denied|unusual traffic)",
+)
+
+
+def _textoVisible(html: str) -> str:
+    sinBloques = RE_BLOQUES.sub(" ", html)
+    sinEtiquetas = RE_ETIQUETAS.sub(" ", sinBloques)
+    return RE_ESPACIOS.sub(" ", sinEtiquetas).strip()
+
+
+def _htmlNecesitaJS(html: str, codigoEstado: int | None) -> bool:
+    if not html or codigoEstado is None:
+        return False
+    if codigoEstado in (403, 429, 503) and RE_DESAFIO.search(html):
+        return True
+    if codigoEstado >= 400:
+        return False
+    texto = _textoVisible(html)
+    if len(texto) < MIN_CHARS_JS:
+        return not RE_HREF.search(html)
+    return bool(RE_SHELL.search(html)) and len(texto) < MIN_CHARS_JS * 2
+
+
+def _pareceContenidoReal(html: str) -> bool:
+    if not html or len(html) < MIN_CHARS_JS:
+        return False
+    return len(_textoVisible(html)) >= MIN_CHARS_JS
+
+
+def _puedeRenderizar(host: str) -> bool:
+    with presupuestoLock:
+        if host in hostsConJS:
+            return True
+        if presupuestoJS[0] <= 0:
+            return False
+        presupuestoJS[0] -= 1
+        return True
+
+
+def _marcarHostConJS(host: str):
+    with presupuestoLock:
+        hostsConJS.add(host)
+
+
+def descargarHTML(url: str, incluirEstado: bool = False):
     try:
-        driver = _driver()
-        driver.get(url)
-        time.sleep(RENDER_WAIT)
-        html = driver.page_source
+        respuesta = _sesion().get(url, timeout=TIMEOUT_HTTP)
         if incluirEstado:
-            codigoEstado = driver.execute_script(
-                "const nav = performance.getEntriesByType('navigation')[0]; "
-                "return nav ? (nav.responseStatus || null) : null;"
-            )
-            return html, codigoEstado
-        return html
-    except Exception as e:
-        logger.error(f"Error al descargar {url} con Selenium: {e}")
+            return respuesta.text, respuesta.status_code
+        return respuesta.text
+    except requests.RequestException as e:
+        logger.error(f"Error al descargar {url} con requests: {e}")
+        if incluirEstado:
+            return "", None
+        return ""
+
+
+def descargarRenderizado(url: str, incluirEstado: bool = False):
+    with SEMAFORO_JS:
         try:
-            respuesta = requests.get(
-                url, headers={"User-Agent": "BreteRIT/1.0"}, timeout=30
-            )
+            driver = _driver()
+            driver.get(url)
+            time.sleep(RENDER_WAIT)
+            html = driver.page_source
             if incluirEstado:
-                return respuesta.text, respuesta.status_code
-            return respuesta.text
-        except requests.RequestException as e2:
-            logger.error(f"Error al descargar {url} con requests: {e2}")
+                codigoEstado = driver.execute_script(
+                    "const nav = performance.getEntriesByType('navigation')[0]; "
+                    "return nav ? (nav.responseStatus || null) : null;"
+                )
+                return html, codigoEstado
+            return html
+        except Exception as e:
+            logger.error(f"Error al renderizar {url} con Selenium: {e}")
             if incluirEstado:
                 return "", None
             return ""
+
+
+def descargarPagina(url: str, incluirEstado: bool = False):
+    logger.info(f"Descargando: {url}")
+    resultado = descargarHTML(url, incluirEstado)
+    html, codigoEstado = resultado if incluirEstado else (resultado, None)
+    if not _htmlNecesitaJS(html, codigoEstado):
+        return resultado
+    host = urlparse(url).netloc.lower().lstrip("www.")
+    if not _puedeRenderizar(host):
+        logger.info(f"[JS] {url}: sin presupuesto de render, se usa el HTML estatico")
+        return resultado
+    logger.info(f"[JS] {url}: HTML estatico insuficiente, renderizando con Chrome")
+    render = descargarRenderizado(url, incluirEstado)
+    htmlRender = render[0] if incluirEstado else render
+    if _pareceContenidoReal(htmlRender):
+        _marcarHostConJS(host)
+        logger.info(f"[JS] {host}: marcado como host con JS, se renderiza siempre")
+    return render
 
 
 def nombreArchivo(nomArchivo: str) -> str:
@@ -320,8 +422,7 @@ def esperarCrawlDelay(url: str):
         time.sleep(espera)
 
 
-def parsearPagina(html: str):
-    patron = r'https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}(?:/[^\s"<>]*)?'
+def parsearPagina(html: str, urlBase: str = ""):
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup.find_all(["script", "style"]):
         tag.decompose()
@@ -329,11 +430,12 @@ def parsearPagina(html: str):
     links = set()
     for link in soup.find_all("a"):
         href = link.get("href")
-        if href and re.match(patron, href):
-            n = normalizarURL(href)
-            if n and esURLUtil(n):
-                ancla = link.get_text(strip=True)[:60]
-                links.add((n, ancla))
+        if not href:
+            continue
+        n = normalizarURL(urljoin(urlBase, href))
+        if n and esURLUtil(n):
+            ancla = link.get_text(strip=True)[:60]
+            links.add((n, ancla))
     return texto, links
 
 
