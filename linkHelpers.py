@@ -15,6 +15,8 @@ from selenium.webdriver.chrome.options import Options
 
 import sqlite3
 
+import unicodedata
+
 listaURLs = set()
 NUM_ITERS = 3  # unas 40 ???
 DELAY = 1.0
@@ -282,12 +284,28 @@ def nombreArchivo(nomArchivo: str) -> str:
 def yaDescargado(nomArchivo: str) -> bool:
     return bool(nomArchivo) and os.path.exists(nombreArchivo(nomArchivo))
 
+def cortarTexto(texto: str):
+    textocort = ""
+    palabras = texto.replace("/"," ").replace("-"," ").replace("_"," ").split()
+
+    for palabra in palabras: 
+        
+        palabra = unicodedata.normalize('NFD', palabra)
+        palabra = re.sub(r'[^a-zA-Z0-9]', '', palabra)
+        palabra: str = palabra.lower()
+        if len(palabra) > 6:
+            palabra = palabra[:6]
+        
+        
+        textocort += ''.join(c for c in palabra if unicodedata.category(c) != 'Mn') + " "
+    return textocort
 
 def guardarTexto(texto: str, nomArchivo: str):
     if not nomArchivo:
         return
     os.makedirs("HTMLs", exist_ok=True)
     with open(nombreArchivo(nomArchivo), "w", encoding="utf-8") as archivo:
+        texto = cortarTexto(texto)
         archivo.write(texto)
 
 
