@@ -3,13 +3,14 @@ import threading
 from queue import Queue
 
 from linkHelpers import (
-    MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, depurarLinks,
-    descargarHTML, esRobotsPermitido, esperarCrawlDelay, guardarLinks,
-    guardarTexto, leerURLs, logger, parsearPagina, puntajeRelevancia,
-    seleccionarFrontera, yaDescargado,
+    MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, descargarHTML,
+    esRobotsPermitido, esperarCrawlDelay, extraerTitulo, guardarResultadoBD,
+    guardarTexto, inicializarBD, logger, obtenerURLsPendientesBD,
+    parsearPagina, puntajeRelevancia, registrarURLsBD, seleccionarFrontera,
 )
 
-STOP = object()
+STOP = object() 
+RUTA_BD = "crawler.db"
 
 cola = Queue()
 lock = threading.Lock()
@@ -19,20 +20,20 @@ loteTerminado = threading.Event()
 
 
 def procesarURL(url: str):
-    if yaDescargado(url):
-        return
-    html = descargarHTML(url)
+    html, codigoEstado = descargarHTML(url, incluirEstado=True)
     if not html:
-        return
+        return None, codigoEstado
+    titulo = extraerTitulo(html)
     texto, links = parsearPagina(html)
     p = puntajeRelevancia(texto)
     if p < MIN_RELEVANCIA:
         logger.info(f"[PUNT] {url}: relevancia {p} < {MIN_RELEVANCIA}, descartada")
-        return
+        return titulo, codigoEstado
     logger.info(f"[PUNT] {url}: relevancia {p}")
     guardarTexto(texto, url)
     with lock:
         linksAcumulados.update(links)
+    return titulo, codigoEstado
 
 
 def trabajador():
@@ -42,13 +43,21 @@ def trabajador():
         if url is STOP:
             cerrarDrivers()
             break
+        titulo = None
+        codigoEstado = None
         try:
             esperarCrawlDelay(url)
             if esRobotsPermitido(url):
-                procesarURL(url)
+                titulo, codigoEstado = procesarURL(url)
             else:
                 logger.info(f"[ROBOTS] {url}: descartado por robots.txt")
+        except Exception as e:
+            logger.exception(f"Error al procesar {url}: {e}")
         finally:
+            try:
+                guardarResultadoBD(url, titulo, codigoEstado, RUTA_BD)
+            except Exception as e:
+                logger.exception(f"Error al actualizar la BD para {url}: {e}")
             with lock:
                 pendientes -= 1
                 if pendientes == 0:
@@ -57,6 +66,7 @@ def trabajador():
 
 def main(maxWorkers: int):
     global pendientes
+    inicializarBD(RUTA_BD)
     hilos = [threading.Thread(target=trabajador, name=f"araña-{n}")
              for n in range(maxWorkers)]
     for t in hilos:
@@ -64,10 +74,10 @@ def main(maxWorkers: int):
 
     i = 0
     while i < NUM_ITERS:
-        urls = leerURLs(f"assets/URLs{i}.txt")
+        urls = obtenerURLsPendientesBD(RUTA_BD)
         if not urls:
-            i += 1
-            continue
+            logger.info("No hay URLs pendientes en la base de datos")
+            break
 
         linksAcumulados.clear()
         with lock:
@@ -80,9 +90,9 @@ def main(maxWorkers: int):
 
         loteTerminado.wait()
         frontera = seleccionarFrontera(linksAcumulados)
-        guardarLinks(frontera, str(i + 1))
+        nuevas = registrarURLsBD(frontera, RUTA_BD)
         logger.info(f"Lote {i} terminado: {len(urls)} URLs procesadas, "
-                    f"frontera [{len(frontera)}]")
+                f"frontera [{len(frontera)}], {nuevas} URLs nuevas")
         i += 1
 
     for _ in hilos:
@@ -93,8 +103,7 @@ def main(maxWorkers: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BreteRIT: araña enfocada")
-    parser.add_argument("--workers", type=int, default=4,
-                        help=f"número de hilos araña (default: 4)")
+    parser.add_argument("--workers", type=int, default=16,
+                        help="número de hilos araña (default: 16)")
     args = parser.parse_args()
     main(maxWorkers=args.workers)
-    depurarLinks()

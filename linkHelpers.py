@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
+import sqlite3
+
 listaURLs = set()
 NUM_ITERS = 3  # unas 40 ???
 DELAY = 1.0
@@ -234,6 +236,7 @@ def esRobotsPermitido(url: str) -> bool:
         lineas = _leerRobotsTXT(host)
         if lineas is None:
             logger.error(f"[ROBOTS] {host}: robots.txt ilegible, se permite (fail-open)")
+            parser.parse(["User-agent: *", "Allow: /"])
         else:
             parser.parse(lineas)
         with robotsLock:
@@ -241,20 +244,33 @@ def esRobotsPermitido(url: str) -> bool:
     return parser.can_fetch("BreteRIT/1.0", url)
 
 
-def descargarHTML(url: str, numIter: int = 0):
+def descargarHTML(url: str, numIter: int = 0, incluirEstado: bool = False):
     logger.info(f"Descargando: {url}")
     try:
         driver = _driver()
         driver.get(url)
         time.sleep(RENDER_WAIT)
-        return driver.page_source
+        html = driver.page_source
+        if incluirEstado:
+            codigoEstado = driver.execute_script(
+                "const nav = performance.getEntriesByType('navigation')[0]; "
+                "return nav ? (nav.responseStatus || null) : null;"
+            )
+            return html, codigoEstado
+        return html
     except Exception as e:
         logger.error(f"Error al descargar {url} con Selenium: {e}")
         try:
-            html = requests.get(url, headers={"User-Agent": "BreteRIT/1.0"})
-            return html.text
+            respuesta = requests.get(
+                url, headers={"User-Agent": "BreteRIT/1.0"}, timeout=30
+            )
+            if incluirEstado:
+                return respuesta.text, respuesta.status_code
+            return respuesta.text
         except requests.RequestException as e2:
             logger.error(f"Error al descargar {url} con requests: {e2}")
+            if incluirEstado:
+                return "", None
             return ""
 
 
@@ -301,3 +317,118 @@ def parsearPagina(html: str):
                 ancla = link.get_text(strip=True)[:60]
                 links.add((n, ancla))
     return texto, links
+
+
+def inicializarBD(
+    rutaBD: str = "crawler.db",
+    archivoSemillas: str = "assets/URLs0.txt",
+    cantidadSemillas: int | None = None,
+):
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    try:
+        conexion.execute("PRAGMA journal_mode = WAL")
+        conexion.execute("PRAGMA busy_timeout = 30000")
+        conexion.execute(
+            """CREATE TABLE IF NOT EXISTS paginas (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   url TEXT NOT NULL UNIQUE,
+                   titulo TEXT,
+                   codigo_estado INTEGER,
+                   scrapeada INTEGER NOT NULL DEFAULT 0
+                       CHECK (scrapeada IN (0, 1)),
+                   fecha_visita TEXT
+               )"""
+        )
+        conexion.execute(
+            "CREATE INDEX IF NOT EXISTS idx_paginas_pendientes "
+            "ON paginas (scrapeada, id)"
+        )
+        if os.path.exists(archivoSemillas) and (
+            cantidadSemillas is None or cantidadSemillas > 0
+        ):
+            semillas = []
+            with open(archivoSemillas, "r", encoding="utf-8") as archivo:
+                for linea in archivo:
+                    url = normalizarURL(linea.strip())
+                    if url:
+                        semillas.append((url,))
+                    if (
+                        cantidadSemillas is not None
+                        and len(semillas) >= cantidadSemillas
+                    ):
+                        break
+            conexion.executemany(
+                "INSERT OR IGNORE INTO paginas (url) VALUES (?)", semillas
+            )
+        conexion.commit()
+    finally:
+        conexion.close()
+
+
+def registrarURLsBD(urls, rutaBD: str = "crawler.db") -> int:
+    registros = []
+    for url in urls:
+        normalizada = normalizarURL(url)
+        if normalizada:
+            registros.append((normalizada,))
+
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    try:
+        conexion.execute("PRAGMA busy_timeout = 30000")
+        cursor = conexion.executemany(
+            "INSERT OR IGNORE INTO paginas (url) VALUES (?)", registros
+        )
+        conexion.commit()
+        return cursor.rowcount
+    finally:
+        conexion.close()
+
+
+def obtenerURLsPendientesBD(
+    rutaBD: str = "crawler.db", limite: int | None = None
+) -> list[str]:
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    try:
+        consulta = "SELECT url FROM paginas WHERE scrapeada = 0 ORDER BY id"
+        parametros = ()
+        if limite is not None:
+            if limite <= 0:
+                return []
+            consulta += " LIMIT ?"
+            parametros = (limite,)
+        filas = conexion.execute(consulta, parametros).fetchall()
+        return [fila[0] for fila in filas]
+    finally:
+        conexion.close()
+
+
+def guardarResultadoBD(
+    url: str,
+    titulo: str | None,
+    codigoEstado: int | None,
+    rutaBD: str = "crawler.db",
+) -> bool:
+    normalizada = normalizarURL(url)
+    if not normalizada:
+        return False
+    fechaVisita = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    try:
+        conexion.execute("PRAGMA busy_timeout = 30000")
+        cursor = conexion.execute(
+            """UPDATE paginas
+               SET titulo = ?, codigo_estado = ?, scrapeada = 1, fecha_visita = ?
+               WHERE url = ?""",
+            (titulo, codigoEstado, fechaVisita, normalizada),
+        )
+        conexion.commit()
+        return cursor.rowcount > 0
+    finally:
+        conexion.close()
+
+
+def extraerTitulo(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    if soup.title is None:
+        return None
+    return soup.title.get_text(" ", strip=True) or None

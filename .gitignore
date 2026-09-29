@@ -3,3 +3,4 @@ __pycache__/
 assets/*
 !assets/URLs0.txt
 .venv
+crawler.db
