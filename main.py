@@ -4,10 +4,11 @@ from queue import Queue
 
 from linkHelpers import (
     MAX_POR_LOTE, MIN_RELEVANCIA, NUM_ITERS, cargarDominiosBloqueados,
-    cargarDominiosJS, cerrarDrivers, descargarPagina, eliminarBloqueadosBD,
-    esRobotsPermitido, esperarCrawlDelay, esURLUtil, extraerTitulo, guardarResultadoBD,
-    guardarTexto, inicializarBD, logger, obtenerURLsPendientesBD,
-    parsearPagina, puntajeRelevancia, registrarURLsBD, seleccionarFrontera,
+    cargarDominiosJS, cerrarDrivers, configurarDelay, descargarPagina,
+    eliminarBloqueadosBD, esRobotsPermitido, esperarCrawlDelay, esURLUtil,
+    extraerTitulo, guardarResultadoBD, guardarTexto, inicializarBD, logger,
+    obtenerURLsPendientesBD, parsearPagina, puntajeRelevancia, registrarURLsBD,
+    seleccionarFrontera,
 )
 
 STOP = object() 
@@ -68,10 +69,11 @@ def trabajador():
                     loteTerminado.set()
 
 
-def main(maxWorkers: int):
+def main(maxWorkers: int, delay: float, lote: int = MAX_POR_LOTE):
     global pendientes
     cargarDominiosJS()
     cargarDominiosBloqueados()
+    configurarDelay(delay)
     inicializarBD(RUTA_BD)
     eliminarBloqueadosBD(RUTA_BD)
     hilos = [threading.Thread(target=trabajador, name=f"araña-{n}")
@@ -81,7 +83,7 @@ def main(maxWorkers: int):
 
     i = 0
     while i < NUM_ITERS:
-        urls = obtenerURLsPendientesBD(RUTA_BD, MAX_POR_LOTE)
+        urls = obtenerURLsPendientesBD(RUTA_BD, lote, aleatorio=True)
         if not urls:
             logger.info("No hay URLs pendientes en la base de datos")
             break
@@ -110,7 +112,11 @@ def main(maxWorkers: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BreteRIT: araña enfocada")
-    parser.add_argument("--workers", type=int, default=16,
-                        help="número de hilos araña (default: 16)")
+    parser.add_argument("--workers", type=int, default=32,
+                        help="número de hilos araña (default: 32)")
+    parser.add_argument("--delay", type=float, default=1.0,
+                        help="crawl-delay en segundos por host (default: 1.0)")
+    parser.add_argument("--lote", type=int, default=MAX_POR_LOTE,
+                        help="URLs por iteración (default: 1000)")
     args = parser.parse_args()
-    main(maxWorkers=args.workers)
+    main(maxWorkers=args.workers, delay=args.delay, lote=args.lote)

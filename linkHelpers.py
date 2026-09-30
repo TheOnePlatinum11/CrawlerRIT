@@ -21,7 +21,7 @@ NUM_ITERS = 40  # unas 40 ???
 DELAY = 1.0
 RENDER_WAIT = 2.5
 
-TIMEOUT_HTTP = (10, 30)  # (conectar, leer)
+TIMEOUT_HTTP = (8, 15)  # (conectar, leer): tope corto para no atascar el hilo
 
 MIN_CHARS_JS = 400
 MIN_PRUEBAS_JS = 12
@@ -137,11 +137,19 @@ def cargarDominiosBloqueados(ruta: str = "assets/Bloqueados0.txt") -> set[str]:
         return _dominiosBloqueados
 
 
+def configurarDelay(delay: float):
+    global DELAY
+    DELAY = max(delay, 0.0)
+
+
 def _sesion() -> requests.Session:
     sesion = getattr(sesionLocal, "sesion", None)
     if sesion is None:
         sesion = requests.Session()
-        sesion.headers.update({"User-Agent": "BreteRIT/1.0"})
+        sesion.headers.update({
+            "User-Agent": "BreteRIT/1.0",
+            "Accept-Encoding": "gzip, deflate, br",
+        })
         sesionLocal.sesion = sesion
     return sesion
 
@@ -163,6 +171,16 @@ def _driver():
         opciones.page_load_strategy = "eager"
         driver = webdriver.Chrome(options=opciones)
         driver.set_page_load_timeout(60)
+        try:
+            driver.execute_cdp_cmd("Network.enable", {})
+            driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": [
+                "*://*/*.png", "*://*/*.jpg", "*://*/*.jpeg", "*://*/*.gif",
+                "*://*/*.webp", "*://*/*.svg", "*://*/*.ico", "*://*/*.avif",
+                "*://*/*.woff", "*://*/*.woff2", "*://*/*.ttf", "*://*/*.otf",
+                "*://*/*.mp4", "*://*/*.mp3", "*://*/*.avi", "*://*/*.mov",
+            ]})
+        except Exception:
+            pass
         driverLocal.driver = driver
     return driver
 
@@ -406,7 +424,18 @@ def descargarRenderizado(url: str, incluirEstado: bool = False):
         try:
             driver = _driver()
             driver.get(url)
-            time.sleep(RENDER_WAIT)
+            # Espera adaptativa: salir apenas el documento esté listo en vez de
+            # dormir RENDER_WAIT fijo en cada página.
+            paso = 0.2
+            transcurrido = 0.0
+            while transcurrido < RENDER_WAIT:
+                listo = driver.execute_script("return document.readyState")
+                if listo == "complete":
+                    break
+                time.sleep(paso)
+                transcurrido += paso
+            if transcurrido < RENDER_WAIT:
+                time.sleep(0.3)
             html = driver.page_source
             if incluirEstado:
                 codigoEstado = driver.execute_script(
@@ -576,15 +605,19 @@ def registrarURLsBD(urls, rutaBD: str = "crawler.db") -> int:
 
 
 def obtenerURLsPendientesBD(
-    rutaBD: str = "crawler.db", limite: int | None = None
+    rutaBD: str = "crawler.db",
+    limite: int | None = None,
+    aleatorio: bool = False,
 ) -> list[str]:
     conexion = sqlite3.connect(rutaBD, timeout=30)
     try:
-        consulta = "SELECT url FROM paginas WHERE scrapeada = 0 ORDER BY id"
+        consulta = "SELECT url FROM paginas WHERE scrapeada = 0"
         parametros = ()
         if limite is not None:
             if limite <= 0:
                 return []
+            # Aleatorio reparte el lote entre miles de hosts:
+            consulta += " ORDER BY RANDOM()" if aleatorio else " ORDER BY id"
             consulta += " LIMIT ?"
             parametros = (limite,)
         filas = conexion.execute(consulta, parametros).fetchall()
