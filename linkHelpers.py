@@ -1,5 +1,6 @@
 #Elaborado por: Elias e Ignacio
 
+import html as html_lib
 import logging
 import os
 import re
@@ -68,6 +69,7 @@ crawlLock = threading.Lock()
 
 robotsCache = {}
 robotsLock = threading.Lock()
+robotsDescartados = set()  # claves base conocidas como prohibidas por robots
 
 driverLocal = threading.local()
 sesionLocal = threading.local()
@@ -287,7 +289,24 @@ def _leerRobotsTXT(host: str) -> list[str]:
     return None
 
 
+def _claveRobots(url: str) -> str:
+    # Reduce ?action=edit&section=N (en cualquier orden) a su URL base, para que
+    # la decision de robots de la base aplique a todas sus variaciones de edicion.
+    partes = urlsplit(url)
+    parametros = [p for p in partes.query.split("&") if p]
+    if any(p == "action=edit" for p in parametros):
+        parametros = [p for p in parametros
+                      if p.split("=", 1)[0] not in ("action", "section")]
+    return urlunsplit((partes.scheme, partes.netloc, partes.path,
+                       "&".join(parametros), ""))
+
+
 def esRobotsPermitido(url: str) -> bool:
+    clave = _claveRobots(url)
+    if url != clave:
+        with robotsLock:
+            if clave in robotsDescartados:
+                return False
     host = urlparse(url).netloc
     if not host:
         return False
@@ -302,7 +321,11 @@ def esRobotsPermitido(url: str) -> bool:
             parser.parse(lineas)
         with robotsLock:
             robotsCache[host] = parser
-    return parser.can_fetch("BreteRIT/1.0", url)
+    permitido = parser.can_fetch("BreteRIT/1.0", url)
+    if not permitido:
+        with robotsLock:
+            robotsDescartados.add(clave)
+    return permitido
 
 
 RE_BLOQUES = re.compile(r"(?is)<(script|style|noscript)\b[^>]*>.*?</\1\s*>")
@@ -339,7 +362,9 @@ def _htmlNecesitaJS(html: str, codigoEstado: int | None) -> bool:
     texto = _textoVisible(html)
     if len(texto) < MIN_CHARS_JS:
         return not RE_HREF.search(html)
-    return bool(RE_SHELL.search(html)) and len(texto) < MIN_CHARS_JS * 2
+    if len(texto) >= MIN_CHARS_JS * 2:
+        return False
+    return bool(RE_SHELL.search(html))
 
 
 def _pareceContenidoReal(html: str) -> bool:
@@ -441,8 +466,8 @@ def cortarTexto(texto: str):
         palabra = unicodedata.normalize('NFD', palabra)
         palabra = re.sub(r'[^a-zA-Z0-9]', '', palabra)
         palabra: str = palabra.lower()
-        if len(palabra) > 6:
-            palabra = palabra[:6]
+        """if len(palabra) > 6:
+            palabra = palabra[:6]"""
         
         
         textocort += ''.join(c for c in palabra if unicodedata.category(c) != 'Mn') + " "
@@ -469,7 +494,7 @@ def esperarCrawlDelay(url: str):
 
 
 def parsearPagina(html: str, urlBase: str = ""):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     for tag in soup.find_all(["script", "style"]):
         tag.decompose()
     texto = soup.get_text()
@@ -616,8 +641,14 @@ def guardarResultadoBD(
         conexion.close()
 
 
+RE_TITULO = re.compile(r"(?is)<title[^>]*>(.*?)</title>")
+
+
 def extraerTitulo(html: str) -> str | None:
-    soup = BeautifulSoup(html, "html.parser")
-    if soup.title is None:
+    # Antes se construia un arbol BeautifulSoup completo (192 ms) solo para leer
+    # <title>; main.py vuelve a parsear el mismo HTML en parsearPagina.
+    encontrado = RE_TITULO.search(html)
+    if encontrado is None:
         return None
-    return soup.title.get_text(" ", strip=True) or None
+    titulo = " ".join(RE_ETIQUETAS.sub(" ", encontrado.group(1)).split())
+    return html_lib.unescape(titulo) or None
