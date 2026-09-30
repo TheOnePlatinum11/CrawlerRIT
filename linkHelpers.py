@@ -16,7 +16,7 @@ import sqlite3
 import unicodedata
 
 listaURLs = set()
-NUM_ITERS = 3  # unas 40 ???
+NUM_ITERS = 40  # unas 40 ???
 DELAY = 1.0
 RENDER_WAIT = 2.5
 
@@ -26,8 +26,7 @@ MIN_CHARS_JS = 400
 MIN_PRUEBAS_JS = 12
 
 MIN_RELEVANCIA = 4
-MAX_LINKS_POR_ITERACION = 1000
-MAX_POR_DOMINIO = 100
+MAX_POR_LOTE = 1000  # tope de la cola por iteracion, no de la base de datos
 
 DOMINIOS_BLOQUEADOS = {
     "facebook.com", "fb.com", "instagram.com", "x.com", "twitter.com",
@@ -213,17 +212,7 @@ def seleccionarFrontera(links) -> list[str]:
         n = normalizarURL(u)
         if n and esURLUtil(n):
             normalizados.add((n, ancla))
-    porDominio = {}
-    seleccion = []
-    for u, ancla in sorted(normalizados, key=lambda x: (not _hintURL(x[0], x[1]), x)):
-        dom = urlparse(u).netloc.lower().lstrip("www.")
-        if porDominio.get(dom, 0) >= MAX_POR_DOMINIO:
-            continue
-        porDominio[dom] = porDominio.get(dom, 0) + 1
-        seleccion.append(u)
-        if len(seleccion) >= MAX_LINKS_POR_ITERACION:
-            break
-    return seleccion
+    return [u for u, _ in sorted(normalizados, key=lambda x: (not _hintURL(x[0], x[1]), x))]
 
 
 def puntajeRelevancia(texto: str) -> int:

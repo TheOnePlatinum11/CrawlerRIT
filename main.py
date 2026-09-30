@@ -3,7 +3,7 @@ import threading
 from queue import Queue
 
 from linkHelpers import (
-    MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, descargarPagina,
+    MAX_POR_LOTE, MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, descargarPagina,
     esRobotsPermitido, esperarCrawlDelay, extraerTitulo, guardarResultadoBD,
     guardarTexto, inicializarBD, logger, obtenerURLsPendientesBD,
     parsearPagina, puntajeRelevancia, registrarURLsBD, seleccionarFrontera,
@@ -25,14 +25,14 @@ def procesarURL(url: str):
         return None, codigoEstado
     titulo = extraerTitulo(html)
     texto, links = parsearPagina(html, url)
+    with lock:
+        linksAcumulados.update(links)
     p = puntajeRelevancia(texto)
     if p < MIN_RELEVANCIA:
-        logger.info(f"[PUNT] {url}: relevancia {p} < {MIN_RELEVANCIA}, descartada")
+        logger.info(f"[PUNT] {url}: relevancia {p} < {MIN_RELEVANCIA}, sin texto")
         return titulo, codigoEstado
     logger.info(f"[PUNT] {url}: relevancia {p}")
     guardarTexto(texto, url)
-    with lock:
-        linksAcumulados.update(links)
     return titulo, codigoEstado
 
 
@@ -74,7 +74,7 @@ def main(maxWorkers: int):
 
     i = 0
     while i < NUM_ITERS:
-        urls = obtenerURLsPendientesBD(RUTA_BD)
+        urls = obtenerURLsPendientesBD(RUTA_BD, MAX_POR_LOTE)
         if not urls:
             logger.info("No hay URLs pendientes en la base de datos")
             break
