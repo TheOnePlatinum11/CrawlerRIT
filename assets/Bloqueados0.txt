@@ -1,0 +1,64 @@
+# Dominios bloqueados (redes sociales, buscadores, publicidad, comercio).
+# 1 por linea, # para comentarios. Subdominios tambien quedan bloqueados.
+# Redes sociales
+facebook.com
+fb.com
+instagram.com
+x.com
+twitter.com
+youtube.com
+youtu.be
+tiktok.com
+reddit.com
+linkedin.com
+whatsapp.com
+wa.me
+pinterest.com
+telegram.me
+t.me
+snapchat.com
+discord.com
+vk.com
+vk.cc
+weibo.com
+twitch.tv
+
+# Publicidad y analitica
+doubleclick.net
+googletagservices.com
+googleadservices.com
+googletagmanager.com
+google-analytics.com
+hotjar.com
+mxpnl.com
+
+# Comercio
+amazon.com
+ebay.com
+shopify.com
+play.google.com
+aliexpress.com
+mercadolibre.com
+netflix.com
+spotify.com
+soundcloud.com
+
+# Buscadores
+google.com
+googleusercontent.com
+bing.com
+yahoo.com
+duckduckgo.com
+baidu.com
+yandex.com
+ask.com
+
+# Otros que nos dieron problemas
+activision.com
+apple.com
+apps.apple.com
+limex.tv
+nintendo.com
+appsflyer.com
+callofduty.com
+

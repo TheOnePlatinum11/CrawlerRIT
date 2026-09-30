@@ -28,19 +28,6 @@ MIN_PRUEBAS_JS = 12
 MIN_RELEVANCIA = 4
 MAX_POR_LOTE = 1000  # tope de la cola por iteracion, no de la base de datos
 
-DOMINIOS_BLOQUEADOS = {
-    "facebook.com", "fb.com", "instagram.com", "x.com", "twitter.com",
-    "youtube.com", "youtu.be", "tiktok.com", "reddit.com", "linkedin.com",
-    "whatsapp.com", "wa.me", "pinterest.com", "telegram.me", "t.me",
-    "snapchat.com", "discord.com", "vk.com", "vk.cc", "weibo.com", "twitch.tv",
-    "doubleclick.net", "googletagservices.com", "googleadservices.com",
-    "googletagmanager.com", "google-analytics.com", "hotjar.com", "mxpnl.com",
-    "amazon.com", "ebay.com", "shopify.com", "play.google.com", "aliexpress.com",
-    "mercadolibre.com", "netflix.com", "spotify.com", "soundcloud.com",
-    "google.com", "googleusercontent.com", "bing.com", "yahoo.com",
-    "duckduckgo.com", "baidu.com", "yandex.com", "ask.com",
-}
-
 EXCLUSIONES_URL = re.compile(
     r"(/login|/signup|/logout|/register|/cart|/checkout|/account|/privacy|"
     r"/terms|/password|/search|/archive\.php|\.(jpg|jpeg|png|gif|svg|webp|ico|"
@@ -89,6 +76,63 @@ SEMAFORO_JS = threading.Semaphore(2)
 hostsConJS = set()
 presupuestoJS = [MIN_PRUEBAS_JS]
 presupuestoLock = threading.Lock()
+
+_dominiosJS = None
+_dominiosJSLock = threading.Lock()
+
+
+def cargarDominiosJS(ruta: str = "assets/JS0.txt") -> set[str]:
+    global _dominiosJS
+    with _dominiosJSLock:
+        if _dominiosJS is not None:
+            return _dominiosJS
+        dominios = set()
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as archivo:
+                for linea in archivo:
+                    dominio = linea.split("#", 1)[0].strip().lower()
+                    if not dominio:
+                        continue
+                    dominio = re.sub(r"^https?://", "", dominio)
+                    dominio = dominio.split("/", 1)[0].split(":", 1)[0]
+                    dominio = dominio.removeprefix("www.")
+                    if dominio:
+                        dominios.add(dominio)
+            logger.info(f"Dominios con JS forzado ({len(dominios)}): {sorted(dominios)}")
+        else:
+            logger.info(f"Sin lista de JS forzado: {ruta} no existe")
+        _dominiosJS = dominios
+        return _dominiosJS
+
+
+def _hostForzadoJS(host: str) -> bool:
+    for d in cargarDominiosJS():
+        if host == d or host.endswith("." + d):
+            return True
+    return False
+
+
+_dominiosBloqueados = None
+_dominiosBloqueadosLock = threading.Lock()
+
+
+def cargarDominiosBloqueados(ruta: str = "assets/Bloqueados0.txt") -> set[str]:
+    global _dominiosBloqueados
+    with _dominiosBloqueadosLock:
+        if _dominiosBloqueados is not None:
+            return _dominiosBloqueados
+        dominios = set()
+        if os.path.exists(ruta):
+            with open(ruta, "r", encoding="utf-8") as archivo:
+                for linea in archivo:
+                    dominio = linea.split("#", 1)[0].strip().lower()
+                    if dominio:
+                        dominios.add(dominio)
+            logger.info(f"Dominios bloqueados ({len(dominios)}): {sorted(dominios)}")
+        else:
+            logger.warning(f"Sin lista de dominios bloqueados: {ruta} no existe")
+        _dominiosBloqueados = dominios
+        return _dominiosBloqueados
 
 
 def _sesion() -> requests.Session:
@@ -173,9 +217,14 @@ def normalizarURL(url: str) -> str:
     return reconstruida
 
 
+def _hostRaiz(host: str) -> str:
+    host = host.lower().split(":")[0]
+    return host.removeprefix("www.")
+
+
 def _hostPermitido(host: str) -> bool:
-    host = host.lower().lstrip("www.")
-    for b in DOMINIOS_BLOQUEADOS:
+    host = _hostRaiz(host)
+    for b in cargarDominiosBloqueados():
         if host == b or host.endswith("." + b):
             return False
     return True
@@ -350,11 +399,19 @@ def descargarRenderizado(url: str, incluirEstado: bool = False):
 
 def descargarPagina(url: str, incluirEstado: bool = False):
     logger.info(f"Descargando: {url}")
+    host = _hostRaiz(urlparse(url).netloc)
+    if _hostForzadoJS(host):
+        logger.info(f"[JS] {host}: dominio forzado, renderizando con Chrome")
+        render = descargarRenderizado(url, incluirEstado)
+        htmlRender = render[0] if incluirEstado else render
+        if htmlRender:
+            return render
+        logger.info(f"[JS] {url}: render fallo, se usa el HTML estatico")
+        return descargarHTML(url, incluirEstado)
     resultado = descargarHTML(url, incluirEstado)
     html, codigoEstado = resultado if incluirEstado else (resultado, None)
     if not _htmlNecesitaJS(html, codigoEstado):
         return resultado
-    host = urlparse(url).netloc.lower().lstrip("www.")
     if not _puedeRenderizar(host):
         logger.info(f"[JS] {url}: sin presupuesto de render, se usa el HTML estatico")
         return resultado
@@ -507,6 +564,29 @@ def obtenerURLsPendientesBD(
             parametros = (limite,)
         filas = conexion.execute(consulta, parametros).fetchall()
         return [fila[0] for fila in filas]
+    finally:
+        conexion.close()
+
+
+def eliminarBloqueadosBD(rutaBD: str = "crawler.db") -> int:
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    try:
+        conexion.execute("PRAGMA busy_timeout = 30000")
+        try:
+            filas = conexion.execute("SELECT id, url FROM paginas").fetchall()
+        except sqlite3.OperationalError:
+            return 0
+        ids = [fila[0] for fila in filas
+               if not _hostPermitido(urlparse(fila[1]).netloc)]
+        if ids:
+            for i in range(0, len(ids), 900):
+                marca = ",".join("?" * len(ids[i:i + 900]))
+                conexion.execute(
+                    f"DELETE FROM paginas WHERE id IN ({marca})", ids[i:i + 900]
+                )
+            conexion.commit()
+            logger.info(f"Eliminadas {len(ids)} URLs de dominios bloqueados de la BD")
+        return len(ids)
     finally:
         conexion.close()
 

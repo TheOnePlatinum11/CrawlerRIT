@@ -2,5 +2,7 @@ HTMLs/
 __pycache__/
 assets/*
 !assets/URLs0.txt
+!assets/JS0.txt
+!assets/Bloqueados0.txt
 .venv
 crawler.db*

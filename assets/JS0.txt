@@ -1,0 +1,12 @@
+# Dominios que siempre se renderizan con Selenium (1 por linea, # para comentarios)
+# Probados con requests: bloquean con 403/401 y no sirven texto util estatico.
+# reuters es el unico que la heuristica no detecta (401): sin esto se pierde.
+apnews.com      # 403 cloudflare
+axios.com       # 403
+politico.com    # 403
+britannica.com  # 403
+nytimes.com     # 403
+elpais.com      # 403
+bloomberg.com   # 403 (687 chars, al borde del umbral)
+ft.com          # 403 (588 chars, al borde del umbral)
+reuters.com     # 401 - unico caso que la heuristica NO rescata

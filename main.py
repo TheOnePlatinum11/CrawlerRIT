@@ -3,8 +3,9 @@ import threading
 from queue import Queue
 
 from linkHelpers import (
-    MAX_POR_LOTE, MIN_RELEVANCIA, NUM_ITERS, cerrarDrivers, descargarPagina,
-    esRobotsPermitido, esperarCrawlDelay, extraerTitulo, guardarResultadoBD,
+    MAX_POR_LOTE, MIN_RELEVANCIA, NUM_ITERS, cargarDominiosBloqueados,
+    cargarDominiosJS, cerrarDrivers, descargarPagina, eliminarBloqueadosBD,
+    esRobotsPermitido, esperarCrawlDelay, esURLUtil, extraerTitulo, guardarResultadoBD,
     guardarTexto, inicializarBD, logger, obtenerURLsPendientesBD,
     parsearPagina, puntajeRelevancia, registrarURLsBD, seleccionarFrontera,
 )
@@ -46,11 +47,14 @@ def trabajador():
         titulo = None
         codigoEstado = None
         try:
-            esperarCrawlDelay(url)
-            if esRobotsPermitido(url):
-                titulo, codigoEstado = procesarURL(url)
+            if not esURLUtil(url):
+                logger.info(f"[BLOQUEO] {url}: descartado (dominio o ruta bloqueada)")
             else:
-                logger.info(f"[ROBOTS] {url}: descartado por robots.txt")
+                esperarCrawlDelay(url)
+                if esRobotsPermitido(url):
+                    titulo, codigoEstado = procesarURL(url)
+                else:
+                    logger.info(f"[ROBOTS] {url}: descartado por robots.txt")
         except Exception as e:
             logger.exception(f"Error al procesar {url}: {e}")
         finally:
@@ -66,7 +70,10 @@ def trabajador():
 
 def main(maxWorkers: int):
     global pendientes
+    cargarDominiosJS()
+    cargarDominiosBloqueados()
     inicializarBD(RUTA_BD)
+    eliminarBloqueadosBD(RUTA_BD)
     hilos = [threading.Thread(target=trabajador, name=f"araña-{n}")
              for n in range(maxWorkers)]
     for t in hilos:
