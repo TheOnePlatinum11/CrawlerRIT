@@ -1,14 +1,17 @@
 # Proyecto RIT: Arañador web
 
-**Tema:** Intervención de Estados Unidos en América Latina
-**Autores:** Elías Ramírez Hernández, Ignacio Ramírez Hernández.
-**Curso:** Recuperación de la Información Textual.
+**Tema:** Intervención de Estados Unidos en América Latina  
+
+**Autores:** Elías Ramírez Hernández, Ignacio Ramírez Sandí.  
+
+**Curso:** Recuperación de la Información Textual.  
+
 
 ---
 
 ## Descripción
 
-El Desclasificador es un crawler implementado en Python que descarga, en
+El Desclasificador es un crawler implementado en Python que descarga y almacena, en
 texto plano, documentos relacionados con la **intervención de Estados Unidos en
 América Latina**. Consta de:
 
@@ -65,9 +68,9 @@ archivos públicos, Wikipedia).
 - Presiones económicas (embargos, deuda, FMI) y programas como la Alianza para el
   Progreso.
 
-Consultas típicas: *"Operación Cóndor", "intervención de EE. UU. en Chile",
+Consultas típicas: *"Operación Cóndor", "~~intervención~~ de EE. UU. en Chile",
 "Golpe de Estado Guatemala 1954", "embargo Cuba", "guerra contra las drogas
-Latinomaérica"*.
+Latinoamérica"*.
 
 ---
 
@@ -78,11 +81,49 @@ Latinomaérica"*.
 | **Crawl-delay por host** | Un único acceso por dominio cada `DELAY = 1 s`, reservado atómicamente (`esperarCrawlDelay`). | Evita saturar un servidor al raspar varios documentos del mismo sitio; cortesía con los archivos y prensa de acceso abierto. |
 | **Descarga concurrente con hilos** | `MAX_WORKERS = 4` hilos persistentes descargando a la vez desde una cola (`queue.Queue`). | Cumple el requisito de "descarga concurrente"; la red es I/O-bound por lo que los hilos no compiten por el GIL. |
 | **Identificación del agente** | User-Agent `El-Desclasificador/1.0` en cada petición. | Transparencia: el arañado se identifica ante los sitios (uso ético y trazable). |
+| **Filtro de relevancia** | `puntajeRelevancia` cuenta los términos del tema en la página; solo se guarda texto con relevancia 4 o más (`MIN_RELEVANCIA`). Un filtro rápido descarta antes las páginas sin pistas. | El repositorio se centra en el tema; se descarta el ruido de páginas sin relación. |
 | **Renderizado completo con Selenium** | Chrome headless carga la página (JS incluido) antes de capturar el DOM. | Muchas fuentes (prensa, archivos digitales) cargan contenido por JavaScript; sin esto la información quedaría incompleta. |
 | **Solo texto plano** | `--blink-settings=imagesEnabled=false` y eliminación de `<script>`/`<style>` antes de `get_text()`. | El repositorio debe ser texto procesado (no HTML, imágenes ni scripts), tal como exige la rúbrica. |
 | **Deduplicación** | No se re-descarga un URL cuyo `.txt` ya existe (`yaDescargado`), y los enlaces por iteración se agregan a un conjunto. | Evita trabajo repetido en re-corridas y controla el crecimiento del repositorio y de la frontera. |
 | **Filtro de ámbito** | Solo se siguen enlaces absolutos `http(s)://` (regex). | Evita enlaces relativos rotos y limita el salto a otros protocolos (mailto, ftp, javascript). |
 | **Profundidad acotada** | `NUM_ITERS` iteraciones; el arañado cambia amplitud por profundidad según se ajuste la constante. | Controla el tiempo y el volumen del repositorio (objetivo: 10 GB de texto limpio). |
+| **Selección aleatoria de la frontera** | Al reclamar URLs pendientes, la base las ordena de forma aleatoria (`ORDER BY RANDOM()`) en vez de por orden de inserción. | Reparte cada lote entre miles de hosts y evita que la pausa por host serialice toda la cola detrás de un mismo sitio. |
+
+### Sistema de relevancia
+
+Cada página descargada se puntúa antes de guardarse. `TERMINOS_RELEVANTES` es
+una lista de expresiones del tema, por ejemplo golpes de Estado, operaciones
+encubiertas, embargos y nombres de países. `puntajeRelevancia` cuenta cuántas de
+esas expresiones aparecen en el texto visible de la página.
+
+Antes de esa cuenta hay un filtro rápido. Se comprueba si el texto en minúsculas
+contiene alguna pista de una lista más corta. Si no contiene ninguna, la página
+se descarta sin ejecutar la cuenta completa. Ese paso evita gastar CPU en
+páginas que casi con seguridad no son del tema.
+
+Solo se escribe en `HTMLs/` el texto con relevancia 4 o más (`MIN_RELEVANCIA`).
+Las demás páginas se marcan como visitadas en `crawler.db` pero no se guardan.
+El umbral se ajusta en `linkHelpers.py`.
+
+En el arañador de Nutch la relevancia se aplica después de la descarga, en
+`nutch/extract.py`, con la misma cuenta y el mismo umbral. Así el repositorio
+queda igual sin importar la implementación.
+
+### Selección aleatoria de la frontera
+
+Las URLs pendientes viven en `crawler.db`. Cuando un productor reclama un lote,
+la base de datos las elige al azar con `ORDER BY RANDOM()`.
+
+La frontera puede crecer a cientos de miles de URLs repartidas en miles de
+hosts. Elegir por orden de inserción concentraría cada lote en un puñado de
+sitios, casi siempre los mismos. Como la cortesía por host limita las peticiones
+a un mismo sitio, toda la cola terminaría esperando detrás de ese host y la
+descarga se haría más lenta.
+
+Al elegir al azar, cada lote toca muchos hosts distintos. La pausa por host se
+mantiene igual de respetuosa, pero deja de ser el cuello de botella, y la
+descarga aprovecha mejor la concurrencia. La elección al azar se aplica en
+`reclamarLoteBD`, en `linkHelpers.py`.
 
 ### Metadatos almacenados
 
