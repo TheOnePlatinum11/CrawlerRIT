@@ -167,7 +167,7 @@ def _sesion() -> requests.Session:
     if sesion is None:
         sesion = requests.Session()
         sesion.headers.update({
-            "User-Agent": "BreteRIT/1.0",
+            "User-Agent": "El-Desclasificador/1.0",
             "Accept-Encoding": "gzip, deflate, br",
         })
         sesionLocal.sesion = sesion
@@ -187,7 +187,7 @@ def _driver():
         opciones.add_argument("--disable-gpu")
         opciones.add_argument("--disable-blink-features=AutomationControlled")
         opciones.add_argument("--blink-settings=imagesEnabled=false")
-        opciones.add_argument("--user-agent=BreteRIT/1.0")
+        opciones.add_argument("--user-agent=El-Desclasificador/1.0")
         opciones.page_load_strategy = "eager"
         driver = webdriver.Chrome(options=opciones)
         driver.set_page_load_timeout(60)
@@ -354,7 +354,7 @@ def _leerRobotsTXT(host: str) -> list[str]:
     for esquema in ("https", "http"):
         try:
             r = requests.get(f"{esquema}://{host}/robots.txt",
-                             headers={"User-Agent": "BreteRIT/1.0"},
+                             headers={"User-Agent": "El-Desclasificador/1.0"},
                              timeout=15)
             if r.status_code == 404:
                 return []
@@ -397,7 +397,7 @@ def esRobotsPermitido(url: str) -> bool:
             parser.parse(lineas)
         with robotsLock:
             robotsCache[host] = parser
-    permitido = parser.can_fetch("BreteRIT/1.0", url)
+    permitido = parser.can_fetch("El-Desclasificador/1.0", url)
     if not permitido:
         with robotsLock:
             robotsDescartados.add(clave)

@@ -8,7 +8,7 @@
 
 ## Descripción
 
-BreteRIT es un crawler implementado en Python que descarga, en
+El Desclasificador es un crawler implementado en Python que descarga, en
 texto plano, documentos relacionados con la **intervención de Estados Unidos en
 América Latina**. Consta de:
 
@@ -77,7 +77,7 @@ Latinomaérica"*.
 | :--- | :--- | :--- |
 | **Crawl-delay por host** | Un único acceso por dominio cada `DELAY = 1 s`, reservado atómicamente (`esperarCrawlDelay`). | Evita saturar un servidor al raspar varios documentos del mismo sitio; cortesía con los archivos y prensa de acceso abierto. |
 | **Descarga concurrente con hilos** | `MAX_WORKERS = 4` hilos persistentes descargando a la vez desde una cola (`queue.Queue`). | Cumple el requisito de "descarga concurrente"; la red es I/O-bound por lo que los hilos no compiten por el GIL. |
-| **Identificación del agente** | User-Agent `BreteRIT/1.0` en cada petición. | Transparencia: el arañado se identifica ante los sitios (uso ético y trazable). |
+| **Identificación del agente** | User-Agent `El-Desclasificador/1.0` en cada petición. | Transparencia: el arañado se identifica ante los sitios (uso ético y trazable). |
 | **Renderizado completo con Selenium** | Chrome headless carga la página (JS incluido) antes de capturar el DOM. | Muchas fuentes (prensa, archivos digitales) cargan contenido por JavaScript; sin esto la información quedaría incompleta. |
 | **Solo texto plano** | `--blink-settings=imagesEnabled=false` y eliminación de `<script>`/`<style>` antes de `get_text()`. | El repositorio debe ser texto procesado (no HTML, imágenes ni scripts), tal como exige la rúbrica. |
 | **Deduplicación** | No se re-descarga un URL cuyo `.txt` ya existe (`yaDescargado`), y los enlaces por iteración se agregan a un conjunto. | Evita trabajo repetido en re-corridas y controla el crecimiento del repositorio y de la frontera. |
