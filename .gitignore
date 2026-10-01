@@ -7,3 +7,8 @@ assets/*
 .venv
 bitacora.*
 crawler.db*
+nutch/apache-nutch-*/
+nutch/crawldb/
+nutch/segments/
+nutch/logs/
+nutch/run-*/

@@ -1,0 +1,2 @@
+# copiar config a donde esta el nutch
+cp "/media/elipoli/RIT/CrawlerRIT/nutch/conf/nutch-site.xml" "/media/elipoli/RIT/CrawlerRIT/nutch/conf/regex-urlfilter.txt" "/media/elipoli/RIT/CrawlerRIT/nutch/apache-nutch-1.23/conf/"

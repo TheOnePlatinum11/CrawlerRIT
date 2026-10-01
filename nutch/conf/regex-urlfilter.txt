@@ -1,0 +1,17 @@
+# protocolos que no nos interesan
+-^(?:file|ftp|mailto):
+
+# binarios / multimedia / estilos (no texto)
+-(?i)\.(?:gif|jpg|jpeg|png|ico|css|sit|eps|wmf|zip|ppt|mpg|xls|gz|rpm|tgz|mov|exe|bmp|js|svg|webp|mp4|avi|webm|mp3|wav|tar|pdf|woff2?|ttf)$
+
+# URLs con caracteres de consulta que no aportan
+-[?*!@=]
+
+# segmentos repetidos (bucles)
+-.*(/[^/]+)/[^/]+\1/[^/]+\1/
+
+# exclusiones temáticas del proyecto (equivalente a EXCLUSIONES_URL)
+-(?i)(/login|/signup|/logout|/register|/cart|/checkout|/account|/privacy|/terms|/password|/search|/archive\.php)
+
+# aceptar lo demás
++.

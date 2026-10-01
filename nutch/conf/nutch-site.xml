@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<!-- El-Desclasificador: sobreescrituras de configuración para el arañado enfocado. -->
+
+<configuration>
+
+  <property>
+    <name>http.agent.name</name>
+    <value>El-Desclasificador</value>
+    <description>Agente identificado ante los sitios.</description>
+  </property>
+
+  <property>
+    <name>http.robots.agents</name>
+    <value>El-Desclasificador,*</value>
+    <description>Agentes considerados al leer robots.txt.</description>
+  </property>
+
+  <property>
+    <name>fetcher.server.delay</name>
+    <value>1.0</value>
+    <description>Cortesía: 1 petición por host por segundo.</description>
+  </property>
+
+  <property>
+    <name>fetcher.threads.fetch</name>
+    <value>50</value>
+    <description>Hilos de descarga concurrentes.</description>
+  </property>
+
+  <property>
+    <name>http.content.limit</name>
+    <value>5242880</value>
+    <description>Tope de bytes por página (5 MB).</description>
+  </property>
+
+  <property>
+    <name>http.timeout</name>
+    <value>15000</value>
+    <description>Tiempo máximo de conexión/lectura en ms.</description>
+  </property>
+
+  <property>
+    <name>db.max.outlink.per.page</name>
+    <value>200</value>
+    <description>Límite de enlaces extraídos por página (controla la frontera).</description>
+  </property>
+
+  <property>
+    <name>db.ignore.external.links</name>
+    <value>false</value>
+    <description>Se siguen enlaces externos (crawl abierto).</description>
+  </property>
+
+</configuration>
