@@ -1,0 +1,2 @@
+cd crawler-java;
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn package;
