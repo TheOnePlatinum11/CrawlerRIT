@@ -5,4 +5,5 @@ assets/*
 !assets/JS0.txt
 !assets/Bloqueados0.txt
 .venv
+bitacora.*
 crawler.db*

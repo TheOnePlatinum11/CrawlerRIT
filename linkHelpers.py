@@ -3,9 +3,11 @@
 import html as html_lib
 import logging
 import os
+import queue
 import re
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
@@ -21,7 +23,10 @@ NUM_ITERS = 40  # unas 40 ???
 DELAY = 1.0
 RENDER_WAIT = 2.5
 
-TIMEOUT_HTTP = (8, 15)  # (conectar, leer): tope corto para no atascar el hilo
+TIMEOUT_HTTP = (6, 12)  # (conectar, leer): tope corto para no atascar el hilo
+
+PAUSA_MS = 250  # separación mínima entre peticiones al mismo host
+MIN_HTML_PARSE = 2000  # páginas más pequeñas no se parsean (basura/redirect)
 
 MIN_CHARS_JS = 400
 MIN_PRUEBAS_JS = 12
@@ -60,8 +65,15 @@ TERMINOS_RELEVANTES = re.compile(
     re.I,
 )
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s [%(threadName)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(threadName)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler("bitacora.log", maxBytes=50 * 1024 * 1024,
+                            backupCount=5, encoding="utf-8"),
+    ],
+)
 logger = logging.getLogger("crawler")
 
 ultimoAcceso = {}
@@ -137,9 +149,17 @@ def cargarDominiosBloqueados(ruta: str = "assets/Bloqueados0.txt") -> set[str]:
         return _dominiosBloqueados
 
 
-def configurarDelay(delay: float):
-    global DELAY
-    DELAY = max(delay, 0.0)
+def configurarPausa(pausa_ms: int):
+    global PAUSA_MS
+    PAUSA_MS = max(pausa_ms, 0)
+
+
+USAR_JS = False
+
+
+def setUsarJS(flag: bool):
+    global USAR_JS
+    USAR_JS = flag
 
 
 def _sesion() -> requests.Session:
@@ -262,6 +282,16 @@ def esURLUtil(url: str) -> bool:
     return True
 
 
+def hostRaizURL(url: str) -> str:
+    return _hostRaiz(urlparse(url).netloc)
+
+
+def esFalloHost(codigo) -> bool:
+    if codigo is None:
+        return True
+    return codigo in (403, 429) or codigo >= 500
+
+
 HINT_PISTAS = (
     "interven", "estados-unidos", "america-latina", "latinoamerica", "golpe",
     "condor", "embargo", "cuba", "chile", "nicaragua", "guatemala", "venezuela",
@@ -284,8 +314,36 @@ def seleccionarFrontera(links) -> list[str]:
     return [u for u, _ in sorted(normalizados, key=lambda x: (not _hintURL(x[0], x[1]), x))]
 
 
+PISTAS_RAPIDAS = (
+    "guerra", "cuba", "chile", "intervenci", "estados unidos", "revoluci",
+    "dictadur", "golpe de estado", "regimen", "embargo", "pinochet", "condor",
+    "mexic", "nicaragua", "guatemala", "argentina", "colombia", "venezuela",
+    "latinoam", "america latina", "united states", "imperial", "sandinista",
+    "castro", "allende", "panama", "honduras", "peru", "bolivia", "brasil",
+    "haiti", "caribe", "guerrilla", "dictatorship", "intervent", "invas",
+    "invad", "ocupaci", "occupi", "blockade", "sanction", "sanciones",
+    "dictador", "guerra fr", "cold war", "doctrina monroe", "monroe doctrine",
+    "operaci", "operation condor", "misil", "missile", "crisis de los misiles",
+    "missile crisis", "bah", "bay of pigs", "latin america", "latin american",
+    "centroam", "central america", "south america", "estadounid", "norteamerican",
+    "imperialism", "hegemon", "hegemony", "revoluç", "revolut", "contrainsurgencia",
+    "contra", "somoza", "arbenz", "torrijos", "noriega", "batista", "trujillo",
+    "represi", "repression", "desclasific", "injerencia", "interference",
+    "yanqui", "diplomaci", "diplomatic", "canal de panama", "espionaje",
+    "espionage", "subvers", "subversion", "guerra sucia", "regime change",
+    "cambio de regimen", "covert", "destabiliz", "proxy war", "guerra por poderes",
+    "drug war", "guantanam", "el salvador", "puerto rico", "granada", "grenada",
+    "republica dominicana", "república dominicana", "dominican republic",
+    "the caribbean", "intervencionismo", "intervenç", "occupied", "bloqueo",
+    "doutrina monroe", "uruguay", "paraguay", "brazil",
+)
+
+
 def puntajeRelevancia(texto: str) -> int:
     if not texto:
+        return 0
+    bajo = texto.lower()
+    if not any(p in bajo for p in PISTAS_RAPIDAS):
         return 0
     return len(set(TERMINOS_RELEVANTES.findall(texto)))
 
@@ -452,6 +510,8 @@ def descargarRenderizado(url: str, incluirEstado: bool = False):
 
 
 def descargarPagina(url: str, incluirEstado: bool = False):
+    if not USAR_JS:
+        return descargarHTML(url, incluirEstado)
     logger.info(f"Descargando: {url}")
     host = _hostRaiz(urlparse(url).netloc)
     if _hostForzadoJS(host):
@@ -502,27 +562,38 @@ def cortarTexto(texto: str):
         textocort += ''.join(c for c in palabra if unicodedata.category(c) != 'Mn') + " "
     return textocort
 
-def guardarTexto(texto: str, nomArchivo: str):
+def guardarTexto(texto: str, nomArchivo: str) -> int:
     if not nomArchivo:
-        return
+        return 0
     os.makedirs("HTMLs", exist_ok=True)
     with open(nombreArchivo(nomArchivo), "w", encoding="utf-8") as archivo:
-        texto = cortarTexto(texto)
-        archivo.write(texto)
+        contenido = cortarTexto(texto)
+        archivo.write(contenido)
+        return len(contenido.encode("utf-8"))
 
 
 def esperarCrawlDelay(url: str):
+    if PAUSA_MS <= 0:
+        return
     host = urlparse(url).netloc
+    gap = PAUSA_MS / 1000.0
     with crawlLock:
-        disponible = ultimoAcceso.get(host, 0.0)
         ahora = time.time()
-        espera = max(disponible - ahora, 0.0)
-        ultimoAcceso[host] = max(disponible, ahora) + DELAY
+        prev = ultimoAcceso.get(host)
+        if prev is None:
+            ultimoAcceso[host] = ahora + gap
+            espera = 0.0
+        else:
+            disponible = max(prev, ahora) + gap
+            ultimoAcceso[host] = disponible
+            espera = max(disponible - ahora, 0.0)
     if espera > 0:
         time.sleep(espera)
 
 
 def parsearPagina(html: str, urlBase: str = ""):
+    if not html or len(html) < MIN_HTML_PARSE:
+        return "", set()
     soup = BeautifulSoup(html, "lxml")
     for tag in soup.find_all(["script", "style"]):
         tag.decompose()
@@ -534,8 +605,7 @@ def parsearPagina(html: str, urlBase: str = ""):
             continue
         n = normalizarURL(urljoin(urlBase, href))
         if n and esURLUtil(n):
-            ancla = link.get_text(strip=True)[:60]
-            links.add((n, ancla))
+            links.add((n, ""))
     return texto, links
 
 
@@ -548,6 +618,7 @@ def inicializarBD(
     try:
         conexion.execute("PRAGMA journal_mode = WAL")
         conexion.execute("PRAGMA busy_timeout = 30000")
+        conexion.execute("PRAGMA wal_autocheckpoint = 1000")
         conexion.execute(
             """CREATE TABLE IF NOT EXISTS paginas (
                    id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -563,6 +634,22 @@ def inicializarBD(
             "CREATE INDEX IF NOT EXISTS idx_paginas_pendientes "
             "ON paginas (scrapeada, id)"
         )
+        columnas = {fila[1] for fila in conexion.execute("PRAGMA table_info(paginas)")}
+        if "reservada" not in columnas:
+            conexion.execute(
+                "ALTER TABLE paginas ADD COLUMN reservada INTEGER NOT NULL DEFAULT 0"
+            )
+        if conexion.execute(
+            "SELECT 1 FROM paginas WHERE scrapeada = 0 AND reservada = 1 LIMIT 1"
+        ).fetchone():
+            while True:
+                n = conexion.execute(
+                    "UPDATE paginas SET reservada = 0 WHERE id IN ("
+                    "SELECT id FROM paginas WHERE scrapeada = 0 AND reservada = 1 "
+                    "LIMIT 10000)"
+                ).rowcount
+                if n == 0:
+                    break
         if os.path.exists(archivoSemillas) and (
             cantidadSemillas is None or cantidadSemillas > 0
         ):
@@ -624,6 +711,132 @@ def obtenerURLsPendientesBD(
         return [fila[0] for fila in filas]
     finally:
         conexion.close()
+
+
+def reclamarLoteBD(rutaBD: str = "crawler.db", limite: int = 1000) -> list[str]:
+    if limite <= 0:
+        return []
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    try:
+        conexion.execute("PRAGMA busy_timeout = 30000")
+        filas = conexion.execute(
+            "UPDATE paginas SET reservada = 1 WHERE id IN ("
+            "SELECT id FROM paginas WHERE scrapeada = 0 AND reservada = 0 "
+            "ORDER BY RANDOM() LIMIT ?) RETURNING url",
+            (limite,),
+        ).fetchall()
+        conexion.commit()
+        return [fila[0] for fila in filas]
+    finally:
+        conexion.close()
+
+
+_colaResultados: queue.Queue | None = None
+_escritorThread: threading.Thread | None = None
+_escritorStop = threading.Event()
+
+
+def iniciarEscritor(rutaBD: str = "crawler.db"):
+    global _colaResultados, _escritorThread
+    _colaResultados = queue.Queue()
+    _escritorStop.clear()
+    _escritorThread = threading.Thread(
+        target=_bucleEscritor, args=(rutaBD,), name="escritor-bd", daemon=True
+    )
+    _escritorThread.start()
+
+
+def encolarResultado(url: str, titulo, codigo):
+    if _colaResultados is not None:
+        _colaResultados.put((url, titulo, codigo))
+
+
+def cerrarEscritor():
+    _escritorStop.set()
+    if _escritorThread is not None:
+        _escritorThread.join(timeout=15)
+
+
+def _bucleEscritor(rutaBD: str):
+    conexion = sqlite3.connect(rutaBD, timeout=30)
+    conexion.execute("PRAGMA busy_timeout = 30000")
+    conexion.execute("PRAGMA synchronous = NORMAL")
+    lote = []
+    try:
+        while not _escritorStop.is_set() or (
+            _colaResultados is not None and not _colaResultados.empty()
+        ):
+            try:
+                item = _colaResultados.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            lote.append(item)
+            if len(lote) >= 1000:
+                _escribirLote(conexion, lote)
+                lote.clear()
+        if lote:
+            _escribirLote(conexion, lote)
+    except Exception as e:
+        logger.error(f"Error en el hilo escritor de la BD: {e}")
+    finally:
+        conexion.close()
+
+
+def _escribirLote(conexion, lote):
+    fechaVisita = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    registros = [
+        (titulo, codigo, fechaVisita, normalizarURL(url))
+        for (url, titulo, codigo) in lote
+    ]
+    registros = [r for r in registros if r[3]]
+    if not registros:
+        return
+    conexion.executemany(
+        """UPDATE paginas
+           SET titulo = ?, codigo_estado = ?, scrapeada = 1, reservada = 0,
+               fecha_visita = ?
+           WHERE url = ?""",
+        registros,
+    )
+    conexion.commit()
+
+
+def puntoControlBD(rutaBD: str = "crawler.db"):
+    try:
+        conexion = sqlite3.connect(rutaBD, timeout=5)
+        conexion.execute("PRAGMA busy_timeout = 2000")
+        conexion.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conexion.close()
+    except sqlite3.Error as e:
+        logger.error(f"Checkpoint del WAL fallido: {e}")
+
+
+def iniciarMantenimientoBD(rutaBD: str = "crawler.db"):
+    threading.Thread(
+        target=_bucleMantenimiento, args=(rutaBD,),
+        name="mantenimiento-wal", daemon=True,
+    ).start()
+
+
+def _bucleMantenimiento(rutaBD: str):
+    while not _escritorStop.is_set():
+        time.sleep(5)
+        if not os.path.exists("crawler.db-wal"):
+            continue
+        tamano = os.path.getsize("crawler.db-wal")
+        if tamano == 0:
+            continue
+        try:
+            conexion = sqlite3.connect(rutaBD, timeout=15)
+            conexion.execute("PRAGMA busy_timeout = 10000")
+            if tamano > 8 * 1024 * 1024:
+                conexion.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                logger.info(f"Mantenimiento: WAL {tamano // (1024 * 1024)} MB truncado")
+            else:
+                conexion.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            conexion.close()
+        except sqlite3.Error as e:
+            logger.error(f"Error en mantenimiento del WAL: {e}")
 
 
 def eliminarBloqueadosBD(rutaBD: str = "crawler.db") -> int:
