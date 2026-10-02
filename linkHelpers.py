@@ -218,21 +218,6 @@ def guardarLinks(links: set[str], nomArchivo: str):
             archivo.write(f"{link}\n")
 
 
-def depurarLinks():
-    listaURLs.clear()
-    i = 0
-    while i < NUM_ITERS:
-        with open(f"assets/URLs{i}.txt", "r") as archivo:
-            for linea in archivo:
-                link = linea.strip()
-                if link:
-                    listaURLs.add(link)
-        i += 1
-
-    guardarLinks(listaURLs, "Explorados")
-    return listaURLs
-
-
 def leerURLs(filePath: str):
     with open(filePath) as archivo:
         URLs = set(linea.strip() for linea in archivo)

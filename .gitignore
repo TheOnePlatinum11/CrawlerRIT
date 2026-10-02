@@ -7,8 +7,6 @@ assets/*
 .venv
 bitacora.*
 crawler.db*
-crawler-java/target/
-crawler-java/dependency-reduced-pom.xml
 nutch/apache-nutch-*/
 nutch/crawldb/
 nutch/segments/
